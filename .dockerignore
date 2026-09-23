@@ -1,0 +1,14 @@
+# Keep the host build context out of the image. Critically, the host .venv must
+# never be copied: its bin/python symlinks point at host paths that do not exist
+# in the container, which shadows the image's own venv and breaks `python`.
+.venv
+venv
+.git
+.github
+__pycache__
+*.pyc
+.pytest_cache
+.DS_Store
+*.zip
+_anon_build
+*.png

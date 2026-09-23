@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies (CPU PyTorch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install numpy pytest
+      - name: Run smoke test
+        run: pytest -q
+      - name: Run the demo
+        run: python inference_audit_demo.py
+      - name: Run the operating-conditions sweep
+        run: python inference_audit_demo.py --sweep

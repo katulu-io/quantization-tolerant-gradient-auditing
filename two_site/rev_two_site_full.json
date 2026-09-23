@@ -1,0 +1,56 @@
+{
+  "reference": {
+    "label": "siteA",
+    "device": "cpu",
+    "processor": "arm",
+    "platform": "macOS-15.7.7-arm64-arm-64bit",
+    "torch": "2.11.0",
+    "hostname": "Michaels-MBP.fritz.box"
+  },
+  "weights_identical_across_files": true,
+  "torch_versions": [
+    "2.11.0",
+    "2.11.0+cpu"
+  ],
+  "rows": [
+    {
+      "label": "siteB-ec2-x86/cpu",
+      "processor": "x86_64",
+      "cross_machine": true,
+      "exact_hash_matches": false,
+      "block_mismatch_fraction": 0.032056217775655205,
+      "attack_block_mismatch_fraction": 0.8868919406243604,
+      "grad_seconds": 0.10727756099999652
+    },
+    {
+      "label": "siteC-use1-x86/cpu",
+      "processor": "x86_64",
+      "cross_machine": true,
+      "exact_hash_matches": false,
+      "block_mismatch_fraction": 0.032056217775655205,
+      "attack_block_mismatch_fraction": 0.8868919406243604,
+      "grad_seconds": 0.05972765199999941
+    },
+    {
+      "label": "siteD-use1-arm/cpu",
+      "processor": "aarch64",
+      "cross_machine": true,
+      "exact_hash_matches": false,
+      "block_mismatch_fraction": 0.020828257034531828,
+      "attack_block_mismatch_fraction": 0.8868919406243604,
+      "grad_seconds": 0.030983435999999642
+    },
+    {
+      "label": "siteA/mps",
+      "processor": "arm",
+      "cross_machine": false,
+      "exact_hash_matches": false,
+      "block_mismatch_fraction": 0.01576008031110808,
+      "attack_block_mismatch_fraction": 0.8868919406243604,
+      "grad_seconds": 1.6183853328693658
+    }
+  ],
+  "honest_block_mismatch_max": 0.032056217775655205,
+  "cross_machine_cpu_honest_max": 0.032056217775655205,
+  "attack_block_mismatch_min": 0.8868919406243604
+}

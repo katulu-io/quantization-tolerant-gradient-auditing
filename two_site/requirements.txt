@@ -1,0 +1,26 @@
+# Dependencies for scripts/rev_two_site.py
+#
+# These versions are PINNED TO SITE A and must match exactly on every site.
+# The whole point of the measurement is to compare a floating-point gradient
+# across machines; if the library versions differ, a mismatch tells you nothing
+# about the hardware. Site A (recorded in results/two_site/siteA_cpu.json):
+#
+#     platform  macOS-15.7.7-arm64-arm-64bit
+#     python    3.12.10
+#     torch     2.11.0
+#     numpy     2.4.4
+#     weights   f8465f9ee7521471   <- rev_two_site.py prints this; it must match
+#
+# The script checks the model weight digest and warns you when it does not.
+#
+# On Linux, install torch from the CPU index first, or pip pulls the default
+# PyPI wheel that bundles CUDA (several GB, and pointless for a CPU probe):
+#
+#     pip install --index-url https://download.pytorch.org/whl/cpu torch==2.11.0
+#     pip install -r rev_two_site_requirements.txt
+#
+# On macOS the default PyPI wheel is already CPU-only, so plain
+# `pip install -r rev_two_site_requirements.txt` is enough.
+
+torch==2.11.0
+numpy==2.4.4

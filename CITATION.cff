@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the accompanying paper (see preferred-citation)."
+title: "Inference-audit demo — Quantization-Tolerant Gradient Auditing for Active Inference-Attack Detection in Federated Learning"
+abstract: >-
+  Self-contained, reproducible demo for a server-side challenge-response audit
+  that detects in-band passive membership inference and the active model-mutating
+  GAN attack in cross-silo federated learning, without differential-privacy noise.
+type: software
+authors:
+  - family-names: "Kuehne-Schlinkert"
+    given-names: "Michael"
+    affiliation: "Katulu GmbH"
+    email: michael@katulu.io
+version: "1.0.0"
+date-released: "2026-09-23"
+license: Apache-2.0
+repository-code: "https://github.com/katulu-io/quantization-tolerant-gradient-auditing"
+keywords:
+  - federated learning
+  - membership inference
+  - passive inference attacks
+  - privacy auditing
+  - challenge-response
+  - Byzantine robustness
+preferred-citation:
+  type: conference-paper
+  title: "Quantization-Tolerant Gradient Auditing for Active Inference-Attack Detection in Federated Learning"
+  authors:
+    - family-names: "Kuehne-Schlinkert"
+      given-names: "Michael"
+      affiliation: "Katulu GmbH"
+  collection-title: "IEEE International Conference on Federated Learning Technologies and Applications (FLTA)"
+  year: 2026

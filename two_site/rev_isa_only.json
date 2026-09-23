@@ -1,0 +1,28 @@
+{
+  "reference": {
+    "label": "siteC-use1-x86",
+    "device": "cpu",
+    "processor": "x86_64",
+    "platform": "Linux-6.1.186-228.376.amzn2023.x86_64-x86_64-with-glibc2.34",
+    "torch": "2.11.0+cpu",
+    "hostname": "ip-172-31-18-248.ec2.internal"
+  },
+  "weights_identical_across_files": true,
+  "torch_versions": [
+    "2.11.0+cpu"
+  ],
+  "rows": [
+    {
+      "label": "siteD-use1-arm/cpu",
+      "processor": "aarch64",
+      "cross_machine": true,
+      "exact_hash_matches": false,
+      "block_mismatch_fraction": 0.02497051685656085,
+      "attack_block_mismatch_fraction": 0.8868919406243604,
+      "grad_seconds": 0.030983435999999642
+    }
+  ],
+  "honest_block_mismatch_max": 0.02497051685656085,
+  "cross_machine_cpu_honest_max": 0.02497051685656085,
+  "attack_block_mismatch_min": 0.8868919406243604
+}

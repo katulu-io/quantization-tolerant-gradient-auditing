@@ -1,0 +1,309 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Site B for the FLTA2026 two-site measurement: an x86_64 or arm64 EC2 instance that
+  runs scripts/rev_two_site.py emit and uploads its fingerprint to S3. Every
+  probe taken so far is arm64, so this instance exists to provide the
+  cross-ISA data point. The instance stays running afterwards so you can
+  measure the inter-site latency leg against it from site A.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: {default: Script and results (S3)}
+        Parameters: [ScriptBucket, ScriptKey, ResultKey]
+      - Label: {default: Network access}
+        Parameters: [VpcId, SubnetId, AllowedCidr]
+      - Label: {default: Instance}
+        Parameters: [Architecture, InstanceType, VolumeSizeGb, LatestAmiId, LatestAmiIdArm64]
+      - Label: {default: Pinned environment (must match site A)}
+        Parameters: [TorchVersion, NumpyVersion, SiteLabel]
+
+Parameters:
+  ScriptBucket:
+    Type: String
+    Description: >-
+      Name of an S3 bucket you already own, in THIS region. Upload the script
+      to it before creating the stack (see the header comment for the command).
+  ScriptKey:
+    Type: String
+    Default: two-site/rev_two_site.py
+    Description: Object key of the uploaded rev_two_site.py.
+  ResultKey:
+    Type: String
+    Default: two-site/siteB_cpu.json
+    Description: Object key the instance writes its fingerprint JSON to.
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to launch into (the default VPC is fine).
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: A PUBLIC subnet in that VPC (it needs a route to an internet gateway).
+  AllowedCidr:
+    Type: String
+    Description: >-
+      Your public IP as a /32, e.g. 203.0.113.7/32. This is the only source
+      allowed to reach the instance, for SSH and for the ICMP/TCP latency probe.
+      Find it with: curl -s https://checkip.amazonaws.com
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    ConstraintDescription: Must be a CIDR block such as 203.0.113.7/32.
+
+  Architecture:
+    Type: String
+    Default: x86_64
+    AllowedValues: [x86_64, arm64]
+    Description: >-
+      x86_64 for the cross-ISA point against the arm64 Macs; arm64 (Graviton)
+      to hold OS and wheel family constant against an x86_64 Linux run and so
+      isolate the ISA term. Must agree with InstanceType - the stack refuses
+      the mismatched combination rather than failing at boot.
+
+  InstanceType:
+    Type: String
+    Default: c6i.xlarge
+    AllowedValues: [c6i.large, c6i.xlarge, c6i.2xlarge, m6i.xlarge, c5.xlarge,
+                    c7g.large, c7g.xlarge, c7g.2xlarge, m7g.xlarge]
+    Description: >-
+      c6i/c5/m6i are Intel/AMD x86_64; c7g/m7g are Graviton arm64. The
+      26.3M-parameter model needs roughly 4 GB while computing the challenge
+      gradient, so xlarge (8 GB) is the safe default.
+  VolumeSizeGb:
+    Type: Number
+    Default: 20
+    MinValue: 12
+    Description: Root volume size. The torch CPU wheel alone unpacks to several GB.
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64
+    Description: Amazon Linux 2023, x86_64. Used when Architecture is x86_64.
+  LatestAmiIdArm64:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64
+    Description: Amazon Linux 2023, arm64. Used when Architecture is arm64.
+
+  TorchVersion:
+    Type: String
+    Default: 2.11.0
+    Description: Must equal site A's torch version or the comparison is meaningless.
+  NumpyVersion:
+    Type: String
+    Default: 2.4.4
+    Description: Must equal site A's numpy version.
+  SiteLabel:
+    Type: String
+    Default: siteB-ec2-x86
+    Description: Label recorded in the emitted JSON.
+  ExpectedWeightDigest:
+    Type: String
+    Default: f8465f9ee7521471
+    Description: >-
+      First 16 hex chars of site A's model weight digest. The instance compares
+      its own against this and reports the verdict, because a mismatch means the
+      two sites built different models and the fingerprint comparison is void.
+
+Rules:
+  GravitonNeedsArm64:
+    RuleCondition:
+      Fn::Contains:
+        - [c7g.large, c7g.xlarge, c7g.2xlarge, m7g.xlarge]
+        - !Ref InstanceType
+    Assertions:
+      - Assert: !Equals [!Ref Architecture, arm64]
+        AssertDescription: c7g/m7g are Graviton - set Architecture to arm64.
+  IntelNeedsX86:
+    RuleCondition:
+      Fn::Contains:
+        - [c6i.large, c6i.xlarge, c6i.2xlarge, m6i.xlarge, c5.xlarge]
+        - !Ref InstanceType
+    Assertions:
+      - Assert: !Equals [!Ref Architecture, x86_64]
+        AssertDescription: c6i/c5/m6i are Intel/AMD - set Architecture to x86_64.
+
+Conditions:
+  IsArm64: !Equals [!Ref Architecture, arm64]
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      # EC2 rejects apostrophes here: descriptions are limited to
+      # a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*
+      GroupDescription: Two-site probe - inbound only from the operator IP.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: SSH, and the TCP-connect latency probe (--port 22)
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedCidr
+        - Description: ICMP echo, for the ping-based latency probe
+          IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          CidrIp: !Ref AllowedCidr
+      SecurityGroupEgress:
+        - Description: Outbound for package installs and S3
+          IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - {Key: Name, Value: !Sub "${AWS::StackName}-sg"}
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Lets you open a shell with `aws ssm start-session` and no SSH key.
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: two-site-s3
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${ScriptBucket}/${ScriptKey}"
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${ScriptBucket}/${ResultKey}"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  WaitHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+
+  EmitComplete:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn: Instance
+    Properties:
+      Handle: !Ref WaitHandle
+      # Installing torch and computing a 26.3M-parameter gradient takes a few
+      # minutes; this is generous so a slow package mirror does not fail the stack.
+      Timeout: "2400"
+      Count: 1
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !If [IsArm64, !Ref LatestAmiIdArm64, !Ref LatestAmiId]
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          AssociatePublicIpAddress: true
+          SubnetId: !Ref SubnetId
+          GroupSet: [!Ref SecurityGroup]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref VolumeSizeGb
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - {Key: Name, Value: !Sub "${AWS::StackName}-siteB"}
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -uxo pipefail
+          exec > >(tee -a /var/log/two-site.log) 2>&1
+
+          # Report failure to CloudFormation instead of hanging until timeout.
+          fail() {
+            curl -s -X PUT -H 'Content-Type:' \
+              --data-binary "{\"Status\":\"FAILURE\",\"Reason\":\"$1\",\"UniqueId\":\"emit\",\"Data\":\"see /var/log/two-site.log\"}" \
+              "${WaitHandle}"
+            exit 1
+          }
+
+          dnf -y update || true
+          # Site A runs 3.12. Amazon Linux 2023's bare `python3` is 3.9, which
+          # torch 2.11 does not support, so insist on 3.12 (or 3.11) and fail
+          # loudly rather than silently falling back to an unusable interpreter.
+          dnf -y install python3.12 python3.12-pip || dnf -y install python3.11 python3.11-pip || true
+          PY=$(command -v python3.12 || command -v python3.11) \
+            || fail "neither python3.12 nor python3.11 is available; site A runs 3.12"
+
+          "${!PY}" -m venv /opt/twosite || fail "venv failed"
+          /opt/twosite/bin/pip install --upgrade pip || fail "pip upgrade failed"
+
+          # CPU-only wheel: the default PyPI torch bundles CUDA and is pointless here.
+          /opt/twosite/bin/pip install --index-url https://download.pytorch.org/whl/cpu \
+            "torch==${TorchVersion}" || fail "torch ${TorchVersion} not installable on x86_64/linux"
+          /opt/twosite/bin/pip install "numpy==${NumpyVersion}" || fail "numpy ${NumpyVersion} failed"
+
+          aws s3 cp "s3://${ScriptBucket}/${ScriptKey}" /opt/twosite/rev_two_site.py \
+            || fail "could not fetch the script from s3://${ScriptBucket}/${ScriptKey}"
+
+          cd /opt/twosite
+          ./bin/python rev_two_site.py emit \
+            --device cpu --label "${SiteLabel}" --out /opt/twosite/siteB_cpu.json \
+            || fail "emit failed"
+
+          aws s3 cp /opt/twosite/siteB_cpu.json "s3://${ScriptBucket}/${ResultKey}" \
+            || fail "could not upload the result"
+
+          ENVLINE=$(/opt/twosite/bin/python -c \
+            "import torch,numpy,platform,sys;print(platform.machine(),'py'+sys.version.split()[0],'torch'+torch.__version__,'numpy'+numpy.__version__)")
+          DIGEST=$(/opt/twosite/bin/python -c \
+            "import json;print(json.load(open('/opt/twosite/siteB_cpu.json'))['weight_digest'][:16])")
+
+          # The model must be bit-identical across sites before comparing the
+          # gradient it induces. A mismatch here means the environments differ,
+          # so any fingerprint difference would say nothing about the hardware.
+          if [ "${!DIGEST}" = "${ExpectedWeightDigest}" ]; then
+            VERDICT="weights=${!DIGEST} MATCHES site A - comparison valid"
+          else
+            VERDICT="weights=${!DIGEST} DOES NOT MATCH site A (${ExpectedWeightDigest}) - comparison void"
+          fi
+
+          curl -s -X PUT -H 'Content-Type:' \
+            --data-binary "{\"Status\":\"SUCCESS\",\"Reason\":\"emit complete\",\"UniqueId\":\"emit\",\"Data\":\"${!ENVLINE} ${!VERDICT}\"}" \
+            "${WaitHandle}"
+
+Outputs:
+  PublicIp:
+    Description: Site B address - use this as --peer for the latency leg.
+    Value: !GetAtt Instance.PublicIp
+
+  EmittedEnvironment:
+    Description: >-
+      Architecture and library versions reported by the instance, plus the model
+      weight digest. The digest MUST equal site A's f8465f9ee7521471; if it does
+      not, the environments differ and the fingerprint comparison is void.
+    Value: !GetAtt EmitComplete.Data
+
+  ResultS3Uri:
+    Description: Where the site B fingerprint landed.
+    Value: !Sub "s3://${ScriptBucket}/${ResultKey}"
+
+  Step1FetchResult:
+    Description: Download the site B fingerprint next to the site A one.
+    Value: !Sub "aws s3 cp s3://${ScriptBucket}/${ResultKey} results/two_site/siteB_cpu.json"
+
+  Step2LatencyTcp:
+    Description: >-
+      The latency leg, TCP connect time - closest to what a cross-silo FL round
+      actually pays. Run this from site A, not on the instance.
+    Value: !Sub
+      - ".venv/bin/python scripts/rev_two_site.py latency --peer ${Ip} --port 22 --n 300 --out results/two_site/latency_AB.json"
+      - {Ip: !GetAtt Instance.PublicIp}
+
+  Step3Compare:
+    Description: Fingerprint comparison across the two sites.
+    Value: >-
+      .venv/bin/python scripts/rev_two_site.py compare results/two_site/siteA_cpu.json
+      results/two_site/siteB_cpu.json results/two_site/siteA_mps.json
+      --out results/two_site/rev_two_site.json
+
+  Cleanup:
+    Description: The instance bills by the hour until you delete the stack.
+    Value: !Sub "aws cloudformation delete-stack --stack-name ${AWS::StackName}"
